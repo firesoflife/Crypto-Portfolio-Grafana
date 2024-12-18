@@ -65,3 +65,25 @@ class InfluxDBHandler:
             print(f"OHLC data written for {currency_pair}: {timestamp}")
         except Exception as e:
             print(f"Error writing OHLC data to InfluxDB: {e}")
+
+    def query(self, query_string):
+        """
+        Query InfluxDB using Flux and return the results.
+        """
+        try:
+            # Perform the query using the OHLC client
+            query_api = self.ohlc_client.query_api()
+            tables = query_api.query(query_string)
+
+            # Extract the data from results
+            results = []
+            for table in tables:
+                for record in table.records:
+                    # Only include _time (and fallback gracefully for other fields)
+                    results.append(
+                        {"_time": record.get_time(), **record.values})
+
+            return results
+        except Exception as e:
+            print(f"Error querying InfluxDB: {e}")
+            return []  # Return an empty list on error
