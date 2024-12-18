@@ -1,0 +1,9 @@
+## Python
+
+[ ] Amend OHLC requests to query twice daily. - 6AM EST and 8PM EST (12:00 UTC and 00:00 UTC)
+
+[ ] Ensure that History (OHLC) data is not creating duplicate entries while calling for last 1000 for each asset
+
+## InfluxDB
+
+[ ] Ensure snapshot scheme is in place - 1 snapshot every hour for 24 hours - Store in a "Snapshots" bucket (?) - Set retention policy to forever
