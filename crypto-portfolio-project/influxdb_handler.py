@@ -1,3 +1,5 @@
+# New file with changes highlighted and comments on removed lines
+
 import influxdb_client
 from influxdb_client.client.write_api import SYNCHRONOUS
 
@@ -14,14 +16,10 @@ class InfluxDBHandler:
         """
         # Separate clients for WebSocket and OHLC buckets
         self.ws_client = influxdb_client.InfluxDBClient(
-            url=websocket_url,
-            token=token,
-            org=org
+            url=websocket_url, token=token, org=org
         )
         self.ohlc_client = influxdb_client.InfluxDBClient(
-            url=ohlc_url,
-            token=token,
-            org=org
+            url=ohlc_url, token=token, org=org
         )
 
         # Separate write APIs for two buckets
@@ -29,6 +27,7 @@ class InfluxDBHandler:
         self.ohlc_write_api = self.ohlc_client.write_api(
             write_options=SYNCHRONOUS)
 
+    # WebSocket Price Updates
     def write_data(self, currency_pair, price, timestamp):
         """
         Write real-time WebSocket price data to InfluxDB (WebSocket bucket).
@@ -46,6 +45,7 @@ class InfluxDBHandler:
         except Exception as e:
             print(f"Failed to write WebSocket data to InfluxDB: {e}")
 
+    # OHLC Writing Logic
     def write_ohlc_data(self, currency_pair, open_, high, low, close, volume, timestamp):
         """
         Write OHLC data into InfluxDB (OHLC bucket).
@@ -66,6 +66,40 @@ class InfluxDBHandler:
         except Exception as e:
             print(f"Error writing OHLC data to InfluxDB: {e}")
 
+    # Ticker Data Storage (Augmented Feature for Step 2)
+    # highlight-next-line
+    def write_ticker_data(self, currency_pair, ticker_data, timestamp, logo_url=None):
+        """
+        Write ticker data to InfluxDB.
+
+        Args:
+            currency_pair (str): The currency pair, e.g., "btcusd".
+            ticker_data (dict): The ticker data, including fields like open, high, low, last, volume, etc.
+            timestamp (int): The UNIX timestamp in nanoseconds.
+        """
+        try:
+            # Build a point for the ticker data
+            point = influxdb_client.Point("crypto_ticker") \
+                .tag("currency_pair", currency_pair) \
+                .field("open", float(ticker_data["open"])) \
+                .field("high", float(ticker_data["high"])) \
+                .field("low", float(ticker_data["low"])) \
+                .field("last", float(ticker_data["last"])) \
+                .field("volume", float(ticker_data["volume"])) \
+                .time(timestamp)
+
+            # Add logo field if available
+            if logo_url:
+                point = point.tag("logo_url", logo_url)
+
+                # Write the point to the OHLC bucket
+            self.ohlc_write_api.write(bucket="crypto_ticker", record=point)
+            print(
+                f"Ticker data written for {currency_pair}: {timestamp} with logo {logo_url} ")
+        except Exception as e:
+            print(f"Error writing ticker data to InfluxDB: {e}")
+
+    # Query Logic (Unmodified for Historical Data)
     def query(self, query_string):
         """
         Query InfluxDB using Flux and return the results.
