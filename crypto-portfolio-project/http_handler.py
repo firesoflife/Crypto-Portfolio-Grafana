@@ -48,6 +48,35 @@ class HTTPHandler:
             raise Exception(
                 f"Failed to fetch OHLC data: {response.status_code}, {response.text}")
 
+    # Add this method back to your HTTPHandler class
+
+    def fetch_ticker_info(self, currency_pairs):
+        """
+        Fetch ticker information for the given currency pairs.
+
+        Args:
+            currency_pairs (list): List of currency pair symbols (e.g., ["btcusd", "xrpusd"]).
+
+        Returns:
+            dict: A dictionary with currency pairs as keys and their ticker data as values.
+        """
+        tickers = {}
+        for pair in currency_pairs:
+            # Construct the URL for the API call
+            url = f"{self.base_url}/ticker/{pair}/"
+
+            # Perform the API request
+            response = requests.get(url)
+
+            # Handle successful responses
+            if response.status_code == 200:
+                tickers[pair] = response.json()
+            else:
+                print(
+                    f"[WARNING] Failed to fetch ticker data for {pair}: {response.status_code}, {response.text}")
+
+        return tickers
+
     def fetch_currencies_with_logo(self):
         """
         Fetch a list of all available currencies with their logos and filter them.

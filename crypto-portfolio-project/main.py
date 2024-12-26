@@ -14,113 +14,115 @@ from http_handler import HTTPHandler
 dotenv_path = os.path.join(os.path.dirname(__file__), '.env')
 load_dotenv(dotenv_path)
 
-# **InfluxDB Configuration**
+# InfluxDB Configuration
 INFLUXDB_URL = os.getenv('INFLUXDB_URL')
 INFLUXDB_TOKEN = os.getenv('INFLUXDB_TOKEN')
 INFLUXDB_ORG = os.getenv('INFLUXDB_ORG')
-INFLUXDB_BUCKET = os.getenv('INFLUXDB_BUCKET')
 
-# **Bitstamp Configuration**
+# Bitstamp Configuration
 CURRENCY_PAIRS = ["btcusd", "xrpusd", "xlmusd",
                   "hbarusd", "vetusd", "csprusd", "xdcusd"]
 WS_URL = "wss://ws.bitstamp.net"
-HTTP_BASE_URL = "https://www.bitstamp.net/api/v2"  # Base URL for Bitstamp HTTP API
+HTTP_BASE_URL = "https://www.bitstamp.net/api/v2"
 
-# --- MODULE INITIALIZATIONS ---
+# Initialize InfluxDB and HTTP Handlers
 influxdb_handler = InfluxDBHandler(
     websocket_url=INFLUXDB_URL,
     ohlc_url=INFLUXDB_URL,
     token=INFLUXDB_TOKEN,
     org=INFLUXDB_ORG,
 )
-
-# Initialize the HTTP handler
 http_handler = HTTPHandler(base_url=HTTP_BASE_URL,
                            tracked_currency_pairs=CURRENCY_PAIRS)
 
+# --- FUNCTIONS ---
 
-# --- UTILITY FUNCTIONS ---
+# Fetch the last recorded timestamp from InfluxDB
+
 
 async def get_last_influx_timestamp(currency_pair):
     """
     Query InfluxDB for the last recorded timestamp for a specified currency pair.
     """
-
     query = f"""
     from(bucket: "crypto_history")
       |> range(start: -1y)
-      |> filter(fn: (r) => r._measurement == \"crypto_history\" and r[\"currency_pair\"] == \"{currency_pair}\")
-      |> keep(columns: [\"_time\"])
+      |> filter(fn: (r) => r._measurement == "crypto_history" and r["currency_pair"] == "{currency_pair}")
+      |> keep(columns: ["_time"])
       |> sort(desc: true)
       |> limit(n: 1)
     """
-
-    # Add debug print for the query string
-    # ADD: Debug log
-    print(f"Generated Flux query for {currency_pair}:\n{query}")
-
     try:
         result = influxdb_handler.query(query)
-        # ADD: Debugging output
-        print(f"Query Result for {currency_pair}: {result}")
-
         if result:
             last_time = result[0]["_time"]
-            # Convert to Unix timestamp
             return int(time.mktime(last_time.timetuple()))
-        else:
-            return None  # Default to None if no result is returned
+        return None
     except Exception as e:
-        print(f"Error querying InfluxDB for {currency_pair}: {e}")
+        print(
+            f"Error querying last InfluxDB timestamp for {currency_pair}: {e}")
         return None
 
+# Process WebSocket trade messages and write to InfluxDB
 
-# --- PROCESS LIVE TRADE DATA ---
+
 async def process_message(message):
     try:
         message_json = json.loads(message)
-        event = message_json.get("event")
-
-        if event == "trade":
-            data = message_json.get("data")
+        if message_json.get("event") == "trade":
+            data = message_json.get("data", {})
             currency_pair = message_json["channel"].split("_")[2]
             price = float(data["price"])
-            # InfluxDB requires nanoseconds
-            timestamp = int(data["timestamp"]) * 1000000000
-
-            # Write live WebSocket trade data to InfluxDB
+            timestamp = int(data["timestamp"]) * 1_000_000_000
             influxdb_handler.write_data(currency_pair, price, timestamp)
-
     except Exception as e:
-        print(f"Error in process_message: {e}")
+        print(f"Failed to process WebSocket message: {e}")
 
 
-# --- BACKFILL HISTORICAL DATA ---
+async def fetch_and_write_ticker_data():
+    """
+    Fetch ticker data for all configured pairs and write to InfluxDB.
+    """
+    print("[INFO] Fetching ticker data and metadata for configured pairs...")
+    tracked_metadata, _, unmatched_pairs = http_handler.fetch_currencies_with_logo()
+
+    # Warn about unmatched pairs
+    if unmatched_pairs:
+        print(f"[WARNING] Unmatched currency pairs: {unmatched_pairs}")
+
+    # Map base currencies to their metadata
+    metadata_map = {currency["currency"].upper(
+    ): currency for currency in tracked_metadata}
+
+    # Fetch ticker data
+    ticker_info = http_handler.fetch_ticker_info(CURRENCY_PAIRS)
+    if not ticker_info:
+        print("[ERROR] No ticker data fetched. Exiting.")
+        return  # Exit if no ticker data is retrieved
+
+    for pair, data in ticker_info.items():
+        try:
+            # Log data before writing to InfluxDB
+            print(f"[DEBUG] Writing ticker data for {pair}: {data}")
+
+            timestamp = int(time.time() * 1e9)  # Current time in nanoseconds
+            base_currency = pair[:-3].upper()
+            metadata = metadata_map.get(base_currency, {})
+            influxdb_handler.write_ticker_data(pair, data, timestamp, metadata)
+        except Exception as e:
+            print(f"[ERROR] Failed to process ticker data for {pair}: {e}")
+
+
 async def backfill_ohlc(currency_pair):
-    """
-    Fetch and backfill historical OHLC data into InfluxDB for a currency pair.
-    Avoid duplicates by starting from the last InfluxDB timestamp.
-    """
-    print(f"Backfilling OHLC data for {currency_pair}...")
     try:
-        # Start from the last recorded timestamp
         start = await get_last_influx_timestamp(currency_pair)
         if start is None:
             print(
-                f"No existing OHLC data for {currency_pair}, backfilling from the beginning of range.")
-        end = int(time.time())  # Current Unix timestamp
-        print(f"Fetching {currency_pair} OHLC data from {start} to {end}...")
-
-        # Call the HTTPHandler to fetch OHLC data
+                f"[INFO] No previous data found for {currency_pair}, backfilling from the start.")
+        end = int(time.time())
         ohlc_data = http_handler.fetch_ohlc(
-            currency_pair=currency_pair,
-            step=3600,  # Timeframe of 1-hour candles
-            limit=1000,  # Fetch maximum 1000 data points
-            start=start,  # Dynamic start timestamp
-            end=end  # Fetch data up to the current time
+            currency_pair, step=3600, limit=1000, start=start, end=end
         )
-
-        # Write fetched OHLC data into InfluxDB
         for candle in ohlc_data:
             influxdb_handler.write_ohlc_data(
                 currency_pair=currency_pair,
@@ -129,55 +131,58 @@ async def backfill_ohlc(currency_pair):
                 low=float(candle["low"]),
                 close=float(candle["close"]),
                 volume=float(candle["volume"]),
-                timestamp=int(candle["timestamp"]) *
-                1000000000  # Convert to nanoseconds
+                timestamp=int(candle["timestamp"]) * 1_000_000_000,
             )
-        print(f"Finished backfilling OHLC data for {currency_pair}.")
     except Exception as e:
-        print(f"Error fetching OHLC data for {currency_pair}: {e}")
+        print(f"[ERROR] Failed to backfill OHLC data for {currency_pair}: {e}")
 
 
-# --- SCHEDULED BACKFILL TASK ---
-async def scheduled_backfill():
+async def scheduled_fetch():
     """
-    Perform OHLC backfills for all currency pairs twice daily.
+    Periodically fetch ticker data and backfill historical OHLC data.
     """
     while True:
-        print("Starting scheduled OHLC backfill task...")
+        print("[INFO] Running scheduled ticker data fetch...")
+        await fetch_and_write_ticker_data()  # Fetch and write ticker data
+
+        print("[INFO] Running scheduled OHLC backfill...")
         for pair in CURRENCY_PAIRS:
             await backfill_ohlc(pair)
-        print("Scheduled backfill completed. Sleeping for 12 hours.")
-        await asyncio.sleep(43200)  # Wait 12 hours (twice daily)
+
+        print("[INFO] Scheduled fetch completed. Sleeping for 12 hours.")
+        await asyncio.sleep(43200)  # 12-hour interval
 
 
-# --- MAIN FUNCTION ---
-async def main(manual_backfill):
+async def main(manual_backfill, fetch_ticker):
     """
-    Main function to handle both real-time WebSocket streaming and OHLC backfills.
+    Main function for periodic tasks or manual commands.
     """
     if manual_backfill:
-        print("Manual backfill triggered...")
+        print("[INFO] Manual backfill mode activated...")
         for pair in CURRENCY_PAIRS:
             await backfill_ohlc(pair)
         return
 
-    # Start the WebSocket listener for real-time trade data
-    print("Starting WebSocket listener...")
+    if fetch_ticker:
+        print("[INFO] Manual ticker fetch mode activated...")
+        await fetch_and_write_ticker_data()
+        return
+
+    # Default: Run WebSocket + Scheduled Fetch (OHLC + Ticker)
+    print("[INFO] Starting WebSocket listener and scheduled tasks...")
     ws_client = WebSocketClient(url=WS_URL, currency_pairs=CURRENCY_PAIRS)
     websocket_task = asyncio.create_task(ws_client.listen(process_message))
+    scheduled_task = asyncio.create_task(scheduled_fetch())
+    await asyncio.gather(websocket_task, scheduled_task)
 
-    # Start the recurring backfill task for twice-daily updates
-    backfill_task = asyncio.create_task(scheduled_backfill())
-
-    # Run both tasks concurrently
-    await asyncio.gather(websocket_task, backfill_task)
-
+# --- ENTRY POINT ---
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--manual-backfill", help="Trigger a manual OHLC data backfill", action="store_true"
-    )
+    parser.add_argument("--manual-backfill", action="store_true",
+                        help="Trigger manual OHLC data backfill.")
+    parser.add_argument("--fetch-ticker", action="store_true",
+                        help="Manually fetch ticker data.")
     args = parser.parse_args()
-
-    asyncio.run(main(manual_backfill=args.manual_backfill))
+    asyncio.run(main(manual_backfill=args.manual_backfill,
+                fetch_ticker=args.fetch_ticker))
