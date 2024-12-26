@@ -10,7 +10,6 @@ class HTTPHandler:
             tracked_currency_pairs (list): List of tracked currency pairs (e.g., ["btcusd", "xrpusd"]).
         """
         self.base_url = base_url
-        # highlight-next-line
         self.tracked_currency_pairs = tracked_currency_pairs
 
     def fetch_ohlc(self, currency_pair, step, limit, start=None, end=None):

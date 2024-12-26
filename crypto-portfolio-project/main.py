@@ -35,7 +35,8 @@ influxdb_handler = InfluxDBHandler(
 )
 
 # Initialize the HTTP handler
-http_handler = HTTPHandler(base_url=HTTP_BASE_URL)
+http_handler = HTTPHandler(base_url=HTTP_BASE_URL,
+                           tracked_currency_pairs=CURRENCY_PAIRS)
 
 
 # --- UTILITY FUNCTIONS ---
@@ -44,15 +45,6 @@ async def get_last_influx_timestamp(currency_pair):
     """
     Query InfluxDB for the last recorded timestamp for a specified currency pair.
     """
-
-    # query = f"""
-    # from(bucket: "crypto_history")
-    #     |> range(start: -1y)
-    #     |> filter(fn: (r) => r._measurement == "crypto_history" and r["currency_pair"] == "{currency_pair}")
-    #     |> keep(columns: ["_time"])
-    #     |> sort(desc: true)
-    #     |> limit(n: 1)
-    # """
 
     query = f"""
     from(bucket: "crypto_history")
@@ -182,7 +174,6 @@ async def main(manual_backfill):
 
 
 if __name__ == "__main__":
-    # ADD: Parse arguments for manual backfill
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--manual-backfill", help="Trigger a manual OHLC data backfill", action="store_true"

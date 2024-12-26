@@ -16,19 +16,19 @@ INFLUXDB_ORG = os.getenv('INFLUXDB_ORG')
 
 def test_ticker_to_influxdb():
     """
-    Test writing ticker data directly into InfluxDB with logos.
+    Test writing ticker data directly into InfluxDB with metadata and logos.
     """
-
     # Initialize the HTTPHandler
     http_handler = HTTPHandler(
         base_url="https://www.bitstamp.net/api/v2",
-        tracked_currency_pairs=["btcusd", "xrpusd"]
+        tracked_currency_pairs=["btcusd", "xrpusd",
+                                "csprusd", "hbarusd", "xdcusd", "xlmusd"]
     )
 
     # Fetch logos and metadata for the tracked coins
-    filtered_currencies, all_currencies, unmatched_pairs = http_handler.fetch_currencies_with_logo()
-    logos = {currency["currency"].upper(): currency["logo"]
-             for currency in filtered_currencies}
+    tracked_metadata, _, unmatched_pairs = http_handler.fetch_currencies_with_logo()
+    metadata_map = {currency["currency"].upper(
+    ): currency for currency in tracked_metadata}
 
     # Example ticker data (static for testing)
     ticker_info = {
@@ -39,13 +39,7 @@ def test_ticker_to_influxdb():
             "last": "27200.00",
             "volume": "120.5",
         },
-        "xrpusd": {
-            "open": "0.50000",
-            "high": "0.51000",
-            "low": "0.48000",
-            "last": "0.49250",
-            "volume": "543211.2"
-        }
+        # You would dynamically have XRPs and every other pair instead!
     }
 
     # Initialize the InfluxDBHandler
@@ -61,12 +55,13 @@ def test_ticker_to_influxdb():
         # Convert current time to nanoseconds for InfluxDB
         timestamp = int(time.time() * 1e9)
 
-        # Extract logo URL for the base currency (e.g., "BTC" from "btcusd")
+        # Extract metadata (e.g., name, logo) for the base currency
         base_currency = pair[:-3].upper()
-        logo_url = logos.get(base_currency)  # Fallback to None if not found
+        # Fallback to empty dict if not present
+        metadata = metadata_map.get(base_currency, {})
 
         influxdb_handler.write_ticker_data(
-            pair, data, timestamp, logo_url=logo_url)
+            pair, data, timestamp, metadata=metadata)
 
 
 if __name__ == "__main__":

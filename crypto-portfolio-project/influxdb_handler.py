@@ -66,9 +66,8 @@ class InfluxDBHandler:
         except Exception as e:
             print(f"Error writing OHLC data to InfluxDB: {e}")
 
-    # Ticker Data Storage (Augmented Feature for Step 2)
-    # highlight-next-line
-    def write_ticker_data(self, currency_pair, ticker_data, timestamp, logo_url=None):
+    # Ticker Data Storage
+    def write_ticker_data(self, currency_pair, ticker_data, timestamp, metadata=None):
         """
         Write ticker data to InfluxDB.
 
@@ -76,6 +75,7 @@ class InfluxDBHandler:
             currency_pair (str): The currency pair, e.g., "btcusd".
             ticker_data (dict): The ticker data, including fields like open, high, low, last, volume, etc.
             timestamp (int): The UNIX timestamp in nanoseconds.
+            metadata (dict): Additional metadata for the currency (e.g., name, logo, etc.)
         """
         try:
             # Build a point for the ticker data
@@ -88,16 +88,26 @@ class InfluxDBHandler:
                 .field("volume", float(ticker_data["volume"])) \
                 .time(timestamp)
 
-            # Add logo field if available
-            if logo_url:
-                point = point.tag("logo_url", logo_url)
+            # Add metadata as tags if provided
+            if metadata:
+                if "name" in metadata:
+                    point = point.tag("name", metadata["name"])
+                if "symbol" in metadata:
+                    point = point.tag("symbol", metadata["symbol"])
+                if "logo" in metadata:
+                    point = point.tag("logo_url", metadata["logo"])
+                if "type" in metadata:
+                    point = point.tag("type", metadata["type"])
+                if "available_supply" in metadata:
+                    point = point.field("available_supply", float(
+                        metadata["available_supply"]))
 
-                # Write the point to the OHLC bucket
+            # Write the point to the OHLC bucket
             self.ohlc_write_api.write(bucket="crypto_ticker", record=point)
-            print(
-                f"Ticker data written for {currency_pair}: {timestamp} with logo {logo_url} ")
+            print(f"Ticker data written for {currency_pair}: {timestamp}")
         except Exception as e:
             print(f"Error writing ticker data to InfluxDB: {e}")
+    # highlight-end
 
     # Query Logic (Unmodified for Historical Data)
     def query(self, query_string):
